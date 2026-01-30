@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lucky Draw - Wheel of Fortune (with Sound)</title>
+  <style>
+    body {font-family: Arial, sans-serif;background: linear-gradient(135deg, #0f172a, #1e3a8a);height: 100vh;display: flex;justify-content: center;align-items: center;color: #fff;}
+    .app {display: grid;grid-template-columns: 1fr 1fr;gap: 20px;background: rgba(0,0,0,0.35);padding: 24px;border-radius: 16px;box-shadow: 0 15px 35px rgba(0,0,0,0.4);width: 900px;max-width: 95vw;}
+    h1 { grid-column: span 2; text-align: center; margin-bottom: 10px; }
+    .left, .right {background: rgba(0,0,0,0.25);padding: 16px;border-radius: 12px;}
+    textarea {width: 100%;height: 180px;border-radius: 8px;border: none;padding: 10px;font-size: 14px;resize: vertical;}
+    .controls button {padding: 10px 16px;border: none;border-radius: 8px;cursor: pointer;font-weight: bold;margin: 5px 5px 0 0;}
+    .load { background: #22c55e; color: #000; }
+    .spin { background: #3b82f6; color: #fff; }
+    .reset { background: #ef4444; color: #fff; }
+    .wheel-wrap { text-align: center; }
+    canvas { background: #fff; border-radius: 50%; }
+    .pointer {width: 0;height: 0;border-left: 15px solid transparent;border-right: 15px solid transparent;border-bottom: 25px solid #facc15;margin: 0 auto 8px auto;}
+    .winner {margin-top: 12px;font-size: 20px;font-weight: bold;color: #facc15;text-align: center;}
+    .list {margin-top: 10px;max-height: 200px;overflow-y: auto;font-size: 13px;background: rgba(0,0,0,0.3);padding: 8px;border-radius: 8px;}
+    .sound-toggle {margin-top: 10px;font-size: 13px;}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>🎡 Lucky Draw - Wheel of Fortune (with Sound)</h1>
+
+    <div class="left">
+      <h3>Participants (one name per line)</h3>
+      <textarea id="namesInput" placeholder="Paste names here...
+John
+Mary
+David
+Sok
+Sitha"></textarea>
+
+      <div class="controls">
+        <button class="load" onclick="loadNames()">Load Names</button>
+        <button class="spin" onclick="spinWheel()">SPIN 🎯</button>
+        <button class="reset" onclick="resetAll()">Reset</button>
+      </div>
+
+      <div class="sound-toggle">
+        <label><input type="checkbox" id="soundOn" checked> Enable Sound</label>
+      </div>
+
+      <div class="list">
+        <strong>Loaded Names:</strong>
+        <div id="namesList"></div>
+      </div>
+    </div>
+
+    <div class="right wheel-wrap">
+      <div class="pointer"></div>
+      <canvas id="wheel" width="360" height="360"></canvas>
+      <div id="winner" class="winner">Winner: -</div>
+    </div>
+  </div>
+
+  <script>
+    const canvas = document.getElementById('wheel');
+    const ctx = canvas.getContext('2d');
+
+    let names = [];
+    let startAngle = 0;
+    let spinTimeout = null;
+    let spinAngleStart = 0;
+    let spinTime = 0;
+    let spinTimeTotal = 0;
+
+    // ===== SOUND ENGINE (Web Audio API) =====
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx();
+
+    function playTick() {
+      if (!document.getElementById('soundOn').checked) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'square';
+      osc.frequency.value = 800;
+      gain.gain.value = 0.05;
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.05);
+    }
+
+    function playWin() {
+      if (!document.getElementById('soundOn').checked) return;
+      const now = audioCtx.currentTime;
+      const freqs = [523, 659, 784]; // C E G (happy sound)
+      freqs.forEach((f, i) => {
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = f;
+        gain.gain.value = 0.08;
+        osc.connect(gain).connect(audioCtx.destination);
+        osc.start(now + i * 0.12);
+        osc.stop(now + i * 0.12 + 0.25);
+      });
+    }
+
+    function loadNames() {
+      const input = document.getElementById('namesInput').value;
+      names = input.split(/\n/).map(n => n.trim()).filter(n => n !== '');
+
+      const listDiv = document.getElementById('namesList');
+      listDiv.innerHTML = '';
+      names.forEach((n, i) => {
+        const d = document.createElement('div');
+        d.innerText = (i+1) + '. ' + n;
+        listDiv.appendChild(d);
+      });
+
+      drawWheel();
+      document.getElementById('winner').innerText = 'Winner: -';
+    }
+
+    function drawWheel() {
+      const outsideRadius = 180;
+      const textRadius = 130;
+      const insideRadius = 40;
+
+      ctx.clearRect(0, 0, 360, 360);
+      if (names.length === 0) return;
+
+      const arc = Math.PI * 2 / names.length;
+
+      for (let i = 0; i < names.length; i++) {
+        const angle = startAngle + i * arc;
+        ctx.fillStyle = getColor(i, names.length);
+
+        ctx.beginPath();
+        ctx.arc(180, 180, outsideRadius, angle, angle + arc, false);
+        ctx.arc(180, 180, insideRadius, angle + arc, angle, true);
+        ctx.fill();
+
+        ctx.save();
+        ctx.fillStyle = '#000';
+        ctx.translate(180 + Math.cos(angle + arc / 2) * textRadius,
+                      180 + Math.sin(angle + arc / 2) * textRadius);
+        ctx.rotate(angle + arc / 2 + Math.PI / 2);
+        ctx.font = 'bold 14px Arial';
+        const text = names[i];
+        ctx.fillText(text, -ctx.measureText(text).width / 2, 0);
+        ctx.restore();
+      }
+    }
+
+    function spinWheel() {
+      if (names.length < 2) { alert('Please load at least 2 names.'); return; }
+
+      // Resume audio on user gesture (required by browsers)
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+
+      spinAngleStart = Math.random() * 10 + 10;
+      spinTime = 0;
+      spinTimeTotal = Math.random() * 3000 + 4000;
+      rotateWheel();
+    }
+
+    function rotateWheel() {
+      spinTime += 30;
+      playTick();
+
+      if (spinTime >= spinTimeTotal) {
+        stopRotateWheel();
+        return;
+      }
+      const spinAngle = spinAngleStart - easeOut(spinTime, 0, spinAngleStart, spinTimeTotal);
+      startAngle += (spinAngle * Math.PI / 180);
+      drawWheel();
+      spinTimeout = setTimeout(rotateWheel, 30);
+    }
+
+    function stopRotateWheel() {
+      clearTimeout(spinTimeout);
+      const arc = Math.PI * 2 / names.length;
+      const degrees = startAngle * 180 / Math.PI + 90;
+      const arcd = arc * 180 / Math.PI;
+      const index = Math.floor((360 - degrees % 360) / arcd);
+      const winner = names[index];
+      document.getElementById('winner').innerText = 'Winner: ' + winner;
+      playWin();
+    }
+
+    function easeOut(t, b, c, d) {
+      const ts = (t /= d) * t;
+      const tc = ts * t;
+      return b + c * (tc + -3 * ts + 3 * t);
+    }
+
+    function getColor(item, maxitem) {
+      const phase = 0;
+      const center = 128;
+      const width = 127;
+      const frequency = Math.PI * 2 / maxitem;
+      const red   = Math.sin(frequency * item + 2 + phase) * width + center;
+      const green = Math.sin(frequency * item + 0 + phase) * width + center;
+      const blue  = Math.sin(frequency * item + 4 + phase) * width + center;
+      return 'rgb(' + Math.floor(red) + ',' + Math.floor(green) + ',' + Math.floor(blue) + ')';
+    }
+
+    function resetAll() {
+      names = [];
+      document.getElementById('namesInput').value = '';
+      document.getElementById('namesList').innerHTML = '';
+      document.getElementById('winner').innerText = 'Winner: -';
+      ctx.clearRect(0,0,360,360);
+    }
+  </script>
+</body>
+</html>
